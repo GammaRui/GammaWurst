@@ -1,6 +1,6 @@
 
 /// define hardware
-#define NEOPIXEL_PRESENT false
+#define NEOPIXEL_PRESENT true
 
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
@@ -67,6 +67,8 @@ void updateTimeSinceLastMovement(int32_t accleration);
 void dmpDataReady() {
   mpuInterrupt = true;
 }
+void updateLedRing(float angle);
+
 
 /// Create instances of classes
 // specific I2C addresses may be passed as a parameter here, default is 0x68
@@ -102,10 +104,10 @@ void setup() {
   Serial.println(F("Initializing DMP..."));
   devStatus = mpu.dmpInitialize();
   // supply your own gyro offsets here, scaled for min sensitivity
-  mpu.setXGyroOffset(219); //220
-  mpu.setYGyroOffset(61); //76
-  mpu.setZGyroOffset(-105); //-85
-  mpu.setZAccelOffset(2229); //1788, 1688 factory default for my test chip
+  mpu.setXGyroOffset(29); //220
+  mpu.setYGyroOffset(17); //76
+  mpu.setZGyroOffset(23); //-85
+  mpu.setZAccelOffset(1041); //1788, 1688 factory default for my test chip
 
   // make sure it worked (returns 0 if so)
   if (devStatus == 0) {
@@ -149,13 +151,14 @@ void setup() {
 }
 void loop() {
   int32_t AcTot = totalAccelerationRaw() - initialAcceleration;
+  /*
   Serial.print("AcTot = ");
   Serial.print(AcTot);
   Serial.print("A init = ");
   Serial.print(initialAcceleration);
   Serial.print("time = ");
   Serial.println(timeMs);
-  
+  */
   updateTimeSinceLastMovement(AcTot);
   updateLedState(timeMs);
 
@@ -209,15 +212,19 @@ int32_t totalAccelerationRaw() {
     mpu.dmpGetAccel(&aa, fifoBuffer);
     mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
     mpu.dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
-/*
+
     // display Euler angles in degrees
     Serial.print("ypr\t");
     Serial.print(ypr[0] * 180 / M_PI);
     Serial.print("\t");
     Serial.print(ypr[1] * 180 / M_PI);
     Serial.print("\t");
-    Serial.print(ypr[2] * 180 / M_PI);
+    Serial.println(ypr[2] * 180 / M_PI);
 
+    // Light LED ring according to yaw angle
+    updateLedRing(ypr[0]);
+    
+/*
     // display initial world-frame acceleration, adjusted to remove gravity
     // and rotated based on known orientation from quaternion
     Serial.print("aworld\t");
@@ -226,11 +233,28 @@ int32_t totalAccelerationRaw() {
     Serial.print(aaWorld.y);
     Serial.print("\t");
     Serial.println(aaWorld.z);
-    */
+  */  
   }
 
   //return sqrt(AcX*AcX + AcY*AcY + AcZ*AcZ);
   return abs(aaWorld.x) + abs(aaWorld.y) + abs(aaWorld.z);
+}
+
+void updateLedRing(float angle) {
+            // Turn off pixels
+            ring.setPixelColor(i, ring.Color(0,0,0));
+            ring.show();
+            
+            if (ypr[0] >= 0) {
+              i = floor((angle* 180/M_PI) / 15);
+            } else {
+              i = 24 + floor((angle* 180/M_PI) / 15);
+            }
+            
+            // Turn on pixels
+            ring.setPixelColor(i, ring.Color(0,120,190));
+            ring.show();
+
 }
 
 void updateLedState(uint16_t timeMs) {
