@@ -1,39 +1,39 @@
 /*==========================================================
- * 
- *                      STROLLER PIMP
- * 
- * =========================================================
- * Adafruit Feather 328P with MPU6050
- * 
- * GY-521  Adafruit
- * MPU6050 Feather
- *         328P          Description
- * ======= ==========    ===================================
- * VCC     3V            3.3V seems to work, otherwise connect to BAT
- * GND     GND           Ground
- * SCL     SCL           I2C clock
- * SDA     SDA           I2C data
- * XDA     not connected
- * XCL     not connected
- * AD0     not connected
- * INT     GPIO2         Interrupt pin
- * =========================================================
- */
+
+                        STROLLER PIMP
+
+   =========================================================
+   Adafruit Feather 328P with MPU6050
+
+   GY-521  Adafruit
+   MPU6050 Feather
+           328P          Description
+   ======= ==========    ===================================
+   VCC     3V            3.3V seems to work, otherwise connect to BAT
+   GND     GND           Ground
+   SCL     SCL           I2C clock
+   SDA     SDA           I2C data
+   XDA     not connected
+   XCL     not connected
+   AD0     not connected
+   INT     GPIO2         Interrupt pin
+   =========================================================
+*/
 
 // define hardware
-#define NEOPIXEL_PRESENT true
+#define NEOPIXEL_PRESENT false
 
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
 // Arduino Wire library is required if I2Cdev I2CDEV_ARDUINO_WIRE implementation
 // is used in I2Cdev.h
 #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
-  #include "Wire.h"
+#include "Wire.h"
 #endif
 
 #if NEOPIXEL_PRESENT
-  // Include the Neopixel library
-  #include <Adafruit_NeoPixel.h>
+// Include the Neopixel library
+#include <Adafruit_NeoPixel.h>
 #endif
 
 #define INTERRUPT_PIN 2  // use pin 2 on Arduino Uno & most boards
@@ -72,7 +72,11 @@ const uint16_t ambientLightThreshold = 1000; // TODO: Set
 const uint32_t LEDOffDelayMs = 10000; // time to wait before turnning LED off after last movement
 
 /// Functions
-int32_t readDMPdata();
+void readDMPdata();
+int32_t getTotalAcceleration();
+float getRoll();
+float getPitch();
+float getYaw();
 void blink(uint8_t pinNo);
 void updateLedState(uint16_t timeMs);
 void updateTimeSinceLastMovement(int32_t accleration);
@@ -83,13 +87,13 @@ void updateLedRing(float angle);
 MPU6050 mpu;
 
 #if NEOPIXEL_PRESENT
-  //NeoPixel declarations
-  const byte neoPin = 9; // Declare and initialise globadl GPIO pin constant for Neopixel ring
-  const byte neoPixels = 24; // Declare and initialise global constant for number of pixels
-  int neoCurrentLed = 0;
-  byte neoBright = 20; // Declare and initialise variable for Neopixel brightness
-  // Create new Neopixel ring object
-  Adafruit_NeoPixel ring = Adafruit_NeoPixel(neoPixels, neoPin, NEO_GRB);
+//NeoPixel declarations
+const byte neoPin = 3; // Declare and initialise globadl GPIO pin constant for Neopixel ring
+const byte neoPixels = 24; // Declare and initialise global constant for number of pixels
+int neoCurrentLed = 0;
+byte neoBright = 20; // Declare and initialise variable for Neopixel brightness
+// Create new Neopixel ring object
+Adafruit_NeoPixel ring = Adafruit_NeoPixel(neoPixels, neoPin, NEO_GRB);
 #endif
 
 // ================================================================
@@ -106,30 +110,30 @@ void dmpDataReady() {
 
 void setup() {
   // join I2C bus (I2Cdev library doesn't do this automatically)
-  #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
-      Wire.begin();
-      Wire.setClock(400000); // 400kHz I2C clock. Comment this line if having compilation difficulties
-  #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
-      Fastwire::setup(400, true);
-  #endif
-    
+#if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+  Wire.begin();
+  Wire.setClock(400000); // 400kHz I2C clock. Comment this line if having compilation difficulties
+#elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
+  Fastwire::setup(400, true);
+#endif
+
   // Init serial
   Serial.begin(38400); // 38 400 is max baud for MCU @ 8MHz
   // initialize MPU
   Serial.println(F("Initializing I2C devices..."));
   mpu.initialize();
   pinMode(INTERRUPT_PIN, INPUT);
-  
+
   // verify connection
   Serial.println(F("Testing device connections..."));
   Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
-  
+
   // wait for ready
-  Serial.println(F("\nSend any character to begin DMP programming and demo: "));
+  //Serial.println(F("\nSend any character to begin DMP programming and demo: "));
   //while (Serial.available() && Serial.read()); // empty buffer
   //while (!Serial.available());                 // wait for data
   //while (Serial.available() && Serial.read()); // empty buffer again
-  
+
   // load and configure the DMP
   Serial.println(F("Initializing DMP..."));
   devStatus = mpu.dmpInitialize();
@@ -171,38 +175,27 @@ void setup() {
     Serial.print(devStatus);
     Serial.println(F(")"));
   }
-  
+
   // Init LED
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, HIGH);
 
-  #if NEOPIXEL_PRESENT
-    // Initialise the ring
-    ring.begin();
-    ring.setBrightness(neoBright);
-    ring.show();
-  #endif
+#if NEOPIXEL_PRESENT
+  // Initialise the ring
+  ring.begin();
+  ring.setBrightness(neoBright);
+  ring.show();
+#endif
 
 }
 void loop() {
-  // if programming failed, don't try to do anything
-  if (!dmpReady) return;
-  if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) { // Get the Latest packet 
-    AcTot = readDMPdata();
-  }  
-  
-  /*
-  Serial.print("AcTot = ");
-  Serial.println(AcTot);
-  /*
-  Serial.print("A init = ");
-  Serial.print(initialAcceleration);
-  Serial.print("time = ");
-  Serial.println(timeMs);
-  */
-  updateTimeSinceLastMovement(AcTot);
-  updateLedState(timeMs);
+  Serial.println("yguygu");
+  readDMPdata();
 
+  updateTimeSinceLastMovement(getTotalAcceleration());
+
+  updateLedRing(getYaw());
+  updateLedState(timeMs);
 }
 
 void blink(uint8_t pinNo) {
@@ -215,54 +208,59 @@ void blink(uint8_t pinNo) {
   }
 }
 
-int32_t readDMPdata() {
-  // read DMP data
-  mpu.dmpGetQuaternion(&q, fifoBuffer);
-  mpu.dmpGetGravity(&gravity, &q);
-  mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
-  mpu.dmpGetAccel(&aa, fifoBuffer);
-  mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
-  mpu.dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
+void readDMPdata() {
+  // if programming failed, don't try to do anything
+  if (!dmpReady) {
+    Serial.println("DMP programming failed");
+    return;
+  }
+  if (!mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) { // Get the Latest packet
+    // read DMP data
+    mpu.dmpGetQuaternion(&q, fifoBuffer);
+    mpu.dmpGetGravity(&gravity, &q);
+    mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+    mpu.dmpGetAccel(&aa, fifoBuffer);
+    mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
+    mpu.dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
+  }
+}
 
-  // display Euler angles in degrees
-  Serial.print("ypr\t");
-  Serial.print(ypr[0] * 180 / M_PI);
-  Serial.print("\t");
-  Serial.print(ypr[1] * 180 / M_PI);
-  Serial.print("\t");
-  Serial.println(ypr[2] * 180 / M_PI);
-
-  // Light LED ring according to yaw angle
-  updateLedRing(ypr[0]);
-    
-  /*
-  // display initial world-frame acceleration, adjusted to remove gravity
-  // and rotated based on known orientation from quaternion
-  Serial.print("aworld\t");
-  Serial.print(aaWorld.x);
-  Serial.print("\t");
-  Serial.print(aaWorld.y);
-  Serial.print("\t");
-  Serial.println(aaWorld.z);
-  */ 
-
+int32_t getTotalAcceleration() {
   return abs(aaWorld.x) + abs(aaWorld.y) + abs(aaWorld.z);
 }
 
+float getYaw() {
+  return (ypr[0] * 180 / M_PI);
+}
+
+float getPitch() {
+  return (ypr[1] * 180 / M_PI);
+}
+
+float getRoll() {
+  return (ypr[2] * 180 / M_PI);
+}
+
 void updateLedRing(float angle) {
-            // Turn off pixels
-            ring.setPixelColor(neoCurrentLed, ring.Color(0,0,0));
-            ring.show();
-            
-            if (ypr[0] >= 0) {
-              neoCurrentLed = floor((angle* 180/M_PI) / 15);
-            } else {
-              neoCurrentLed = 24 + floor((angle* 180/M_PI) / 15);
-            }
-            
-            // Turn on pixels
-            ring.setPixelColor(neoCurrentLed, ring.Color(0,120,190));
-            ring.show();
+#if NEOPIXEL_PRESENT
+
+  // Turn off pixels
+  ring.setPixelColor(neoCurrentLed, ring.Color(0, 0, 0));
+  ring.show();
+
+  if (ypr[0] >= 0) {
+    neoCurrentLed = floor((angle) / (360/neoPixels));
+  } else {
+    neoCurrentLed = neoPixels + floor((angle) / (360/neoPixels));
+  }
+  
+  Serial.print("LED ringsvinkel");
+  Serial.println(angle);
+
+  // Turn on pixels
+  ring.setPixelColor(neoCurrentLed, ring.Color(0, 120, 190));
+  ring.show();
+#endif
 
 }
 
