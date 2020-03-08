@@ -59,14 +59,20 @@ float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gra
 
 /// Declare variables
 //int32_t AcX, AcY, AcZ, Tmp, GyX, GyY, GyZ; // raw data from MPU
-uint16_t timeMs = 0; // time since last movement
-//bool ledStatus = 1; // helper variable for blink function
+uint16_t motionTimeMs = 0; // time since last movement
 int32_t initialAcceleration = 0;
 int32_t AcTot = 0;
-unsigned long previousMillis = 0; 
+unsigned long previousYawMillis = 0; 
 const long intervalYaw = 500;           // interval at which to check yaw change (milliseconds)
 float previousYaw = 0;
-float thresholdYaw = 0.5;
+const float thresholdYaw = 0.5;
+unsigned long previousBlink = 0;
+const long blinkOffDelay = 5000;
+unsigned long previousBlinkInterval = 0;
+const long intervalBlink = 100;
+bool blinkLeft = false;
+bool blinkRight = false;
+int blinkCount = 0;
 
 /// Declare constants
 const int MPU_addr = 0x68; // I2C address of the MPU-6050
@@ -77,7 +83,7 @@ const uint32_t LEDOffDelayMs = 10000; // time to wait before turnning LED off af
 /// Functions
 int32_t readDMPdata();
 void blink(uint8_t pinNo);
-void updateLedState(uint16_t timeMs);
+void updateLedState();
 void updateTimeSinceLastMovement(int32_t accleration);
 void updateLedRing(float angle);
 
@@ -94,7 +100,7 @@ MPU6050 mpu;
   const byte neoPixelsLeft = 8; // Declare and initialise global constant for number of pixels in left strip
   const byte neoPixelsRight = 8; // Declare and initialise global constant for number of pixels in rigth strip
   int neoCurrentLed = 0;
-  byte neoBright = 30; // Declare and initialise variable for Neopixel brightness
+  byte neoBright = 20; // Declare and initialise variable for Neopixel brightness
   // Create new Neopixel ring object
   Adafruit_NeoPixel ring = Adafruit_NeoPixel(neoPixelsRing, neoPinRing, NEO_GRB);
   Adafruit_NeoPixel stripLeft = Adafruit_NeoPixel(neoPixelsLeft, neoPinLeft, NEO_GRB);
@@ -208,31 +214,24 @@ void loop() {
     AcTot = readDMPdata();
   }
 
+  //Detect turning
   unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= intervalYaw) {
+  if (currentMillis - previousYawMillis >= intervalYaw) {
 
-    previousMillis = currentMillis;
-
-    Serial.print("Delta rotation / 100 ms:");
-    Serial.println(ypr[0]-previousYaw);
+    //Serial.print("Delta rotation / 100 ms:");
+    //Serial.println(ypr[0]-previousYaw);
     if (ypr[0]-previousYaw <= (thresholdYaw*-1)) {
       //Left turn detected
-      Serial.println("Turning left");
-      stripLeft.setPixelColor(1, stripLeft.Color(255,255,0));
-      stripLeft.show();    
+      blinkLeft = true;
+      Serial.println("Turning left"); 
     }else if (ypr[0]-previousYaw >= thresholdYaw) {
        //Right turn detected
+       blinkRight = true;
       Serial.println("Turning right"); 
-      stripRight.setPixelColor(1, stripRight.Color(255,255,0));
-      stripRight.show();  
-    } else {
-      stripRight.setPixelColor(1, stripRight.Color(0,0,0));
-      stripRight.show(); 
-      stripLeft.setPixelColor(1, stripLeft.Color(0,0,0));
-      stripLeft.show(); 
     }
+    
+    previousYawMillis = currentMillis;
     previousYaw = ypr[0];
-
 
   }
   /*
@@ -242,10 +241,10 @@ void loop() {
   Serial.print("A init = ");
   Serial.print(initialAcceleration);
   Serial.print("time = ");
-  Serial.println(timeMs);
+  Serial.println(motionTimeMs);
   */
   updateTimeSinceLastMovement(AcTot);
-  updateLedState(timeMs);
+  updateLedState();
 
 }
 
@@ -311,18 +310,74 @@ void updateLedRing(float angle) {
 
 }
 
-void updateLedState(uint16_t timeMs) {
-  if (timeMs < LEDOffDelayMs) {
+void updateLedState() {
+  if (motionTimeMs < LEDOffDelayMs) {
     digitalWrite(LED_PIN, HIGH);
   } else {
     digitalWrite(LED_PIN, LOW);
+  }
+  
+  // Activate blink strips
+  if(blinkLeft == true) {
+    //Update strip
+    stripLeft.setPixelColor(blinkCount, stripLeft.Color(255,255,0));
+    stripLeft.setPixelColor(blinkCount+1, stripLeft.Color(255,255,0));
+    stripLeft.setPixelColor(blinkCount-1, stripLeft.Color(0,0,0));
+    stripLeft.show();
+
+    //Blink interval and next pixel counter
+    if (millis() - previousBlinkInterval >= intervalBlink) {
+      blinkCount += 1;
+      previousBlinkInterval = millis();
+      if (blinkCount > 7) {
+        stripLeft.setPixelColor(blinkCount-1, stripLeft.Color(0,0,0));
+        stripLeft.show();  
+        blinkCount = 0;
+      } 
+    }
+    blinkRight = false;      
+  } 
+  if (blinkRight == true) {
+    //Update strip
+    stripRight.setPixelColor(blinkCount, stripRight.Color(255,255,0));
+    stripRight.setPixelColor(blinkCount+1, stripRight.Color(255,255,0));
+    stripRight.setPixelColor(blinkCount-1, stripRight.Color(0,0,0));
+    stripRight.show();
+
+    //Blink interval and next pixel counter
+    if (millis() - previousBlinkInterval >= intervalBlink) {
+      blinkCount += 1;
+      previousBlinkInterval = millis();
+      if (blinkCount > 7) {
+        stripRight.setPixelColor(blinkCount-1, stripRight.Color(0,0,0));
+        stripRight.show();  
+        blinkCount = 0;
+      } 
+    }
+    blinkLeft = false;
+  }
+
+  //Turn off blink strips
+  if (millis() - previousBlink > blinkOffDelay) {
+    for (int i = 0; i <= 8; i++) {
+      stripRight.setPixelColor(i, stripRight.Color(0,0,0));
+      stripRight.show(); 
+      stripLeft.setPixelColor(i, stripLeft.Color(0,0,0));
+      stripLeft.show();
+    } 
+
+    //reset flags and timer
+    previousBlink = millis();
+    blinkLeft = false;
+    blinkRight = false;
+    blinkCount = 0;
   }
 }
 
 void updateTimeSinceLastMovement(int32_t acceleration) {
   if (abs(acceleration) > accelerationThreshold) {
-    timeMs = 0;
+    motionTimeMs = 0;
   } else {
-    timeMs += 10; // estimate of loop time
+    motionTimeMs += 10; // estimate of loop time
   }
 }
