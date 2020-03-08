@@ -63,10 +63,13 @@ uint16_t timeMs = 0; // time since last movement
 //bool ledStatus = 1; // helper variable for blink function
 int32_t initialAcceleration = 0;
 int32_t AcTot = 0;
+unsigned long previousMillis = 0; 
+const long intervalYaw = 500;           // interval at which to check yaw change (milliseconds)
+float previousYaw = 0;
+float thresholdYaw = 0.5;
 
 /// Declare constants
 const int MPU_addr = 0x68; // I2C address of the MPU-6050
-//const uint8_t ledPin = 13;
 const int32_t accelerationThreshold = 6000;
 const uint16_t ambientLightThreshold = 1000; // TODO: Set
 const uint32_t LEDOffDelayMs = 10000; // time to wait before turnning LED off after last movement
@@ -84,12 +87,18 @@ MPU6050 mpu;
 
 #if NEOPIXEL_PRESENT
   //NeoPixel declarations
-  const byte neoPin = 9; // Declare and initialise globadl GPIO pin constant for Neopixel ring
-  const byte neoPixels = 24; // Declare and initialise global constant for number of pixels
+  const byte neoPinRing = 6; // Declare and initialise globadl GPIO pin constant for Neopixel ring
+  const byte neoPinLeft = 10; // Declare and initialise globadl GPIO pin constant for NeoStrip left
+  const byte neoPinRight = 9; // Declare and initialise globadl GPIO pin constant for NeoStrip Right
+  const byte neoPixelsRing = 24; // Declare and initialise global constant for number of pixels in Ring
+  const byte neoPixelsLeft = 8; // Declare and initialise global constant for number of pixels in left strip
+  const byte neoPixelsRight = 8; // Declare and initialise global constant for number of pixels in rigth strip
   int neoCurrentLed = 0;
-  byte neoBright = 20; // Declare and initialise variable for Neopixel brightness
+  byte neoBright = 30; // Declare and initialise variable for Neopixel brightness
   // Create new Neopixel ring object
-  Adafruit_NeoPixel ring = Adafruit_NeoPixel(neoPixels, neoPin, NEO_GRB);
+  Adafruit_NeoPixel ring = Adafruit_NeoPixel(neoPixelsRing, neoPinRing, NEO_GRB);
+  Adafruit_NeoPixel stripLeft = Adafruit_NeoPixel(neoPixelsLeft, neoPinLeft, NEO_GRB);
+  Adafruit_NeoPixel stripRight = Adafruit_NeoPixel(neoPixelsRight, neoPinRight, NEO_GRB);
 #endif
 
 // ================================================================
@@ -181,6 +190,14 @@ void setup() {
     ring.begin();
     ring.setBrightness(neoBright);
     ring.show();
+    // Initialise the left strip
+    stripLeft.begin();
+    stripLeft.setBrightness(neoBright);
+    stripLeft.show();
+    // Initialise the right strip
+    stripRight.begin();
+    stripRight.setBrightness(neoBright);
+    stripRight.show();
   #endif
 
 }
@@ -189,8 +206,35 @@ void loop() {
   if (!dmpReady) return;
   if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) { // Get the Latest packet 
     AcTot = readDMPdata();
-  }  
-  
+  }
+
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis >= intervalYaw) {
+
+    previousMillis = currentMillis;
+
+    Serial.print("Delta rotation / 100 ms:");
+    Serial.println(ypr[0]-previousYaw);
+    if (ypr[0]-previousYaw <= (thresholdYaw*-1)) {
+      //Left turn detected
+      Serial.println("Turning left");
+      stripLeft.setPixelColor(1, stripLeft.Color(255,255,0));
+      stripLeft.show();    
+    }else if (ypr[0]-previousYaw >= thresholdYaw) {
+       //Right turn detected
+      Serial.println("Turning right"); 
+      stripRight.setPixelColor(1, stripRight.Color(255,255,0));
+      stripRight.show();  
+    } else {
+      stripRight.setPixelColor(1, stripRight.Color(0,0,0));
+      stripRight.show(); 
+      stripLeft.setPixelColor(1, stripLeft.Color(0,0,0));
+      stripLeft.show(); 
+    }
+    previousYaw = ypr[0];
+
+
+  }
   /*
   Serial.print("AcTot = ");
   Serial.println(AcTot);
@@ -225,13 +269,14 @@ int32_t readDMPdata() {
   mpu.dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
 
   // display Euler angles in degrees
+/*
   Serial.print("ypr\t");
   Serial.print(ypr[0] * 180 / M_PI);
   Serial.print("\t");
   Serial.print(ypr[1] * 180 / M_PI);
   Serial.print("\t");
   Serial.println(ypr[2] * 180 / M_PI);
-
+*/
   // Light LED ring according to yaw angle
   updateLedRing(ypr[0]);
     
@@ -255,9 +300,9 @@ void updateLedRing(float angle) {
             ring.show();
             
             if (ypr[0] >= 0) {
-              neoCurrentLed = floor((angle* 180/M_PI) / 15);
+              neoCurrentLed = floor((angle* 180/M_PI) / (360/neoPixelsRing));
             } else {
-              neoCurrentLed = 24 + floor((angle* 180/M_PI) / 15);
+              neoCurrentLed = 24 + floor((angle* 180/M_PI) / (360/neoPixelsRing));
             }
             
             // Turn on pixels
