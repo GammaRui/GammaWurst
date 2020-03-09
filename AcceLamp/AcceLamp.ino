@@ -38,7 +38,6 @@
 
 #define INTERRUPT_PIN 2  // use pin 2 on Arduino Uno & most boards
 #define LED_PIN 13 // (Arduino is 13, Teensy is 11, Teensy++ is 6)
-bool ledStatus = false;
 
 /// MPU control/status vars
 bool dmpReady = false;  // set true if DMP init was successful
@@ -63,13 +62,10 @@ uint16_t motionTimeMs = 0; // time since last movement
 int32_t initialAcceleration = 0;
 int32_t AcTot = 0;
 unsigned long previousYawMillis = 0; 
-const long intervalYaw = 500;           // interval at which to check yaw change (milliseconds)
 float previousYaw = 0;
-const float thresholdYaw = 0.5;
 unsigned long previousBlink = 0;
-const long blinkOffDelay = 5000;
 unsigned long previousBlinkInterval = 0;
-const long intervalBlink = 100;
+bool ledStatus = false;
 bool blinkLeft = false;
 bool blinkRight = false;
 int blinkCount = 0;
@@ -77,8 +73,12 @@ int blinkCount = 0;
 /// Declare constants
 const int MPU_addr = 0x68; // I2C address of the MPU-6050
 const int32_t accelerationThreshold = 6000;
-const uint16_t ambientLightThreshold = 1000; // TODO: Set
-const uint32_t LEDOffDelayMs = 10000; // time to wait before turnning LED off after last movement
+//const uint16_t ambientLightThreshold = 1000; // TODO: Set
+const uint32_t LEDOffDelayMs = 10000;   // time to wait before turnning LED off after last movement
+const long intervalYaw = 500;           // interval at which to check yaw change (milliseconds)
+const float thresholdYaw = 0.4;         // Turn angle in Rad, 1 Rad approx. 60 deg
+const long blinkOffDelay = 5000;        // Duration of turn indication
+const long intervalBlink = 100;         // Blink frequency
 
 /// Functions
 int32_t readDMPdata();
@@ -86,6 +86,8 @@ void blink(uint8_t pinNo);
 void updateLedState();
 void updateTimeSinceLastMovement(int32_t accleration);
 void updateLedRing(float angle);
+void turnOffBlinkLeft();
+void turnOffBlinkRight();
 
 /// Create instances of classes
 // specific I2C addresses may be passed as a parameter here, default is 0x68
@@ -95,16 +97,18 @@ MPU6050 mpu;
   //NeoPixel declarations
   const byte neoPinRing = 6; // Declare and initialise globadl GPIO pin constant for Neopixel ring
   const byte neoPinLeft = 10; // Declare and initialise globadl GPIO pin constant for NeoStrip left
+  
   const byte neoPinRight = 9; // Declare and initialise globadl GPIO pin constant for NeoStrip Right
   const byte neoPixelsRing = 24; // Declare and initialise global constant for number of pixels in Ring
-  const byte neoPixelsLeft = 8; // Declare and initialise global constant for number of pixels in left strip
-  const byte neoPixelsRight = 8; // Declare and initialise global constant for number of pixels in rigth strip
-  int neoCurrentLed = 0;
-  byte neoBright = 20; // Declare and initialise variable for Neopixel brightness
+  const byte neoPixelsStrip = 8; // Declare and initialise global constant for number of pixels in blink strips
+  
+  int neoCurrentLed = 0; // Counter used for neoRing
+  byte neoBright = 40; // Declare and initialise variable for Neopixel brightness
+  
   // Create new Neopixel ring object
   Adafruit_NeoPixel ring = Adafruit_NeoPixel(neoPixelsRing, neoPinRing, NEO_GRB);
-  Adafruit_NeoPixel stripLeft = Adafruit_NeoPixel(neoPixelsLeft, neoPinLeft, NEO_GRB);
-  Adafruit_NeoPixel stripRight = Adafruit_NeoPixel(neoPixelsRight, neoPinRight, NEO_GRB);
+  Adafruit_NeoPixel stripLeft = Adafruit_NeoPixel(neoPixelsStrip, neoPinLeft, NEO_GRB);
+  Adafruit_NeoPixel stripRight = Adafruit_NeoPixel(neoPixelsStrip, neoPinRight, NEO_GRB);
 #endif
 
 // ================================================================
@@ -223,10 +227,14 @@ void loop() {
     if (ypr[0]-previousYaw <= (thresholdYaw*-1)) {
       //Left turn detected
       blinkLeft = true;
+      blinkRight = false;
+      turnOffBlinkRight();
       Serial.println("Turning left"); 
     }else if (ypr[0]-previousYaw >= thresholdYaw) {
        //Right turn detected
        blinkRight = true;
+       blinkLeft = false;
+       turnOffBlinkLeft();
       Serial.println("Turning right"); 
     }
     
@@ -329,13 +337,12 @@ void updateLedState() {
     if (millis() - previousBlinkInterval >= intervalBlink) {
       blinkCount += 1;
       previousBlinkInterval = millis();
-      if (blinkCount > 7) {
+      if (blinkCount >= neoPixelsStrip) {
         stripLeft.setPixelColor(blinkCount-1, stripLeft.Color(0,0,0));
         stripLeft.show();  
         blinkCount = 0;
       } 
-    }
-    blinkRight = false;      
+    }     
   } 
   if (blinkRight == true) {
     //Update strip
@@ -354,17 +361,14 @@ void updateLedState() {
         blinkCount = 0;
       } 
     }
-    blinkLeft = false;
   }
+  
 
-  //Turn off blink strips
+  //Maximum blink timer reached
   if (millis() - previousBlink > blinkOffDelay) {
-    for (int i = 0; i <= 8; i++) {
-      stripRight.setPixelColor(i, stripRight.Color(0,0,0));
-      stripRight.show(); 
-      stripLeft.setPixelColor(i, stripLeft.Color(0,0,0));
-      stripLeft.show();
-    } 
+    //Turn off blinks
+    turnOffBlinkLeft();
+    turnOffBlinkRight();
 
     //reset flags and timer
     previousBlink = millis();
@@ -372,6 +376,20 @@ void updateLedState() {
     blinkRight = false;
     blinkCount = 0;
   }
+}
+
+void turnOffBlinkLeft() {
+    for (int i = 0; i <= neoPixelsStrip; i++) {
+      stripLeft.setPixelColor(i, stripLeft.Color(0,0,0));
+      stripLeft.show();
+    } 
+}
+
+void turnOffBlinkRight() {
+    for (int i = 0; i <= neoPixelsStrip; i++) {
+      stripRight.setPixelColor(i, stripRight.Color(0,0,0));
+      stripRight.show(); 
+    }
 }
 
 void updateTimeSinceLastMovement(int32_t acceleration) {
