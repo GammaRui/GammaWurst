@@ -22,6 +22,7 @@
 
 // define hardware
 #define NEOPIXEL_PRESENT true
+#define IRSENSOR_PRESENT false
 
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
@@ -35,6 +36,17 @@
   // Include the Neopixel library
   #include <Adafruit_NeoPixel.h>
 #endif
+
+#if IRSENSOR_PRESENT
+  //Include SharpIR library https://github.com/guillaume-rico/SharpIR
+  //Currently the library takes the mean of 25 readings, which takes roughly 53 ms. 
+  // !!!!! PROBABLY TOO LONG TO BE USED IN THE LOOP !!!!!
+  #include <SharpIR.h>
+  
+  #define IR_PIN A1 // Analog input for Sharp IR sensor
+  #define IR_MODEL 1080 //IR sensor model GP2Y0A21Y
+#endif
+
 
 #define INTERRUPT_PIN 2  // use pin 2 on Arduino Uno & most boards
 #define LED_PIN 13 // (Arduino is 13, Teensy is 11, Teensy++ is 6)
@@ -70,6 +82,7 @@ bool blinkLeft = false;
 bool blinkRight = false;
 int blinkCount = 0;
 
+
 /// Declare constants
 const int MPU_addr = 0x68; // I2C address of the MPU-6050
 const int32_t accelerationThreshold = 6000;
@@ -96,9 +109,9 @@ MPU6050 mpu;
 #if NEOPIXEL_PRESENT
   //NeoPixel declarations
   const byte neoPinRing = 6; // Declare and initialise globadl GPIO pin constant for Neopixel ring
-  const byte neoPinLeft = 10; // Declare and initialise globadl GPIO pin constant for NeoStrip left
-  
+  const byte neoPinLeft = 10; // Declare and initialise globadl GPIO pin constant for NeoStrip left 
   const byte neoPinRight = 9; // Declare and initialise globadl GPIO pin constant for NeoStrip Right
+
   const byte neoPixelsRing = 24; // Declare and initialise global constant for number of pixels in Ring
   const byte neoPixelsStrip = 8; // Declare and initialise global constant for number of pixels in blink strips
   
@@ -109,6 +122,11 @@ MPU6050 mpu;
   Adafruit_NeoPixel ring = Adafruit_NeoPixel(neoPixelsRing, neoPinRing, NEO_GRB);
   Adafruit_NeoPixel stripLeft = Adafruit_NeoPixel(neoPixelsStrip, neoPinLeft, NEO_GRB);
   Adafruit_NeoPixel stripRight = Adafruit_NeoPixel(neoPixelsStrip, neoPinRight, NEO_GRB);
+#endif
+
+#if IRSENSOR_PRESENT
+  // Create a new instance of the SharpIR class:
+  SharpIR distSensor = SharpIR(IR_PIN, IR_MODEL);
 #endif
 
 // ================================================================
@@ -221,36 +239,37 @@ void loop() {
   //Detect turning
   unsigned long currentMillis = millis();
   if (currentMillis - previousYawMillis >= intervalYaw) {
-
-    //Serial.print("Delta rotation / 100 ms:");
-    //Serial.println(ypr[0]-previousYaw);
     if (ypr[0]-previousYaw <= (thresholdYaw*-1)) {
       //Left turn detected
       blinkLeft = true;
       blinkRight = false;
       turnOffBlinkRight();
-      Serial.println("Turning left"); 
     }else if (ypr[0]-previousYaw >= thresholdYaw) {
        //Right turn detected
        blinkRight = true;
        blinkLeft = false;
        turnOffBlinkLeft();
-      Serial.println("Turning right"); 
     }
     
     previousYawMillis = currentMillis;
     previousYaw = ypr[0];
 
   }
+  
+  #if IRSENSOR_PRESENT
+    //Read and print distance sensor data
+    Serial.print("Distance = ");
+    Serial.println(distSensor.distance());
+  #endif
+  
   /*
   Serial.print("AcTot = ");
   Serial.println(AcTot);
-  /*
-  Serial.print("A init = ");
-  Serial.print(initialAcceleration);
-  Serial.print("time = ");
-  Serial.println(motionTimeMs);
   */
+  
+  // Light LED ring according to yaw angle
+  updateLedRing(ypr[0]);
+
   updateTimeSinceLastMovement(AcTot);
   updateLedState();
 
@@ -275,46 +294,24 @@ int32_t readDMPdata() {
   mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
   mpu.dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
 
-  // display Euler angles in degrees
-/*
-  Serial.print("ypr\t");
-  Serial.print(ypr[0] * 180 / M_PI);
-  Serial.print("\t");
-  Serial.print(ypr[1] * 180 / M_PI);
-  Serial.print("\t");
-  Serial.println(ypr[2] * 180 / M_PI);
-*/
-  // Light LED ring according to yaw angle
-  updateLedRing(ypr[0]);
-    
-  /*
-  // display initial world-frame acceleration, adjusted to remove gravity
-  // and rotated based on known orientation from quaternion
-  Serial.print("aworld\t");
-  Serial.print(aaWorld.x);
-  Serial.print("\t");
-  Serial.print(aaWorld.y);
-  Serial.print("\t");
-  Serial.println(aaWorld.z);
-  */ 
-
   return abs(aaWorld.x) + abs(aaWorld.y) + abs(aaWorld.z);
 }
 
 void updateLedRing(float angle) {
-            // Turn off pixels
-            ring.setPixelColor(neoCurrentLed, ring.Color(0,0,0));
-            ring.show();
-            
-            if (ypr[0] >= 0) {
-              neoCurrentLed = floor((angle* 180/M_PI) / (360/neoPixelsRing));
-            } else {
-              neoCurrentLed = 24 + floor((angle* 180/M_PI) / (360/neoPixelsRing));
-            }
-            
-            // Turn on pixels
-            ring.setPixelColor(neoCurrentLed, ring.Color(0,120,190));
-            ring.show();
+  // Turn off pixels
+  ring.setPixelColor(neoCurrentLed, ring.Color(0,0,0));
+  ring.show();
+
+  //Determine pixel to lit
+  if (ypr[0] >= 0) {
+    neoCurrentLed = floor((angle* 180/M_PI) / (360/neoPixelsRing));
+  } else {
+    neoCurrentLed = 24 + floor((angle* 180/M_PI) / (360/neoPixelsRing));
+  }
+  
+  // Turn on pixels
+  ring.setPixelColor(neoCurrentLed, ring.Color(0,120,190));
+  ring.show();
 
 }
 
@@ -362,7 +359,6 @@ void updateLedState() {
       } 
     }
   }
-  
 
   //Maximum blink timer reached
   if (millis() - previousBlink > blinkOffDelay) {
